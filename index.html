@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tqdm 压缩运行报告（PR #48 分支）</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<style>
+/* Layout: one reading column; a figure row up top, then sections that each pair a short verdict with its table or chart. */
+:root {
+  --bg: #f4f6f9; --card: #fcfcfb; --ink: #14171c; --ink-2: #474e5c; --ink-3: #6b7281;
+  --line: #dde1e8; --accent: #2a78d6; --accent-soft: #dfeafa; --track: #cde2fb;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --good: #0ca30c; --warn: #fab219; --crit: #d03b3b;
+  --good-ink: #0b6b0b; --warn-ink: #7a5200; --crit-ink: #a52727;
+  --good-bg: #e4f5e4; --warn-bg: #fdf1d3; --crit-bg: #fbe3e3;
+  --font-body: Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --font-head: "Space Grotesk", Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111315; --card: #1a1a19; --ink: #eceef1; --ink-2: #c0c5ce; --ink-3: #959cab;
+    --line: #2f333a; --accent: #3987e5; --accent-soft: #162c47; --track: #0d366b;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --good-ink: #7fd67f; --warn-ink: #f3c458; --crit-ink: #f08d8d;
+    --good-bg: #12301a; --warn-bg: #3a2d0c; --crit-bg: #3b1a1a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111315; --card: #1a1a19; --ink: #eceef1; --ink-2: #c0c5ce; --ink-3: #959cab;
+  --line: #2f333a; --accent: #3987e5; --accent-soft: #162c47; --track: #0d366b;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  --good-ink: #7fd67f; --warn-ink: #f3c458; --crit-ink: #f08d8d;
+  --good-bg: #12301a; --warn-bg: #3a2d0c; --crit-bg: #3b1a1a;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.65; }
+.page { max-width: 980px; margin: 0 auto; padding-block: 36px 72px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 40px; }
+header { display: flex; flex-direction: column; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .04em; color: var(--ink-3); }
+h1 { font-family: var(--font-head); font-weight: 600; font-size: clamp(26px, 4.4vw, 38px); line-height: 1.2; margin: 0; text-wrap: balance; }
+h2 { font-family: var(--font-head); font-weight: 600; font-size: 21px; line-height: 1.3; margin: 0; text-wrap: balance; }
+h3 { font-size: 15px; font-weight: 600; margin: 0; }
+p { margin: 0; max-width: 68ch; }
+.lede { font-size: 16.5px; color: var(--ink-2); max-width: 70ch; }
+code, .mono { font-family: var(--font-mono); font-size: .88em; }
+code { background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+section { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 13px; color: var(--ink-2); }
+.meta b { font-weight: 500; color: var(--ink-3); }
+
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.kpi { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.kpi .label { font-size: 12.5px; color: var(--ink-3); }
+.kpi .value { font-family: var(--font-head); font-weight: 600; font-size: 30px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.kpi .value small { font-size: 15px; font-weight: 500; color: var(--ink-2); }
+.kpi .note { font-size: 12.5px; color: var(--ink-2); }
+
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 500; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.pill.good { background: var(--good-bg); color: var(--good-ink); }
+.pill.warn { background: var(--warn-bg); color: var(--warn-ink); }
+.pill.crit { background: var(--crit-bg); color: var(--crit-ink); }
+.pill i { font-style: normal; font-weight: 700; }
+
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.panel > h3 + .sub { margin-top: -10px; }
+.sub { font-size: 13px; color: var(--ink-3); }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 8px 12px 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 500; color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
+td.num, th.num { text-align: right; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td .mono { overflow-wrap: anywhere; }
+
+/* meters: one ratio per row against its own whole */
+.meters { display: grid; grid-template-columns: minmax(150px, 1.2fr) minmax(120px, 2fr) auto; gap: 12px 16px; align-items: center; }
+.meters .name { font-size: 13.5px; }
+.meters .name small { display: block; color: var(--ink-3); font-size: 12px; }
+.meter { position: relative; height: 12px; background: var(--track); border-radius: 6px; }
+.meter > span { position: absolute; inset: 0 auto 0 0; background: var(--s1); border-radius: 6px 4px 4px 6px; }
+.meter > em { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ink); border-radius: 1px; }
+.meters .fig { font-family: var(--font-head); font-weight: 600; font-size: 17px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.meters .fig small { font-family: var(--font-body); font-weight: 400; font-size: 12px; color: var(--ink-3); display: block; }
+@media (max-width: 560px) { .meters { grid-template-columns: 1fr auto; } .meters .meter { grid-column: 1 / -1; order: 3; } .meters .name { order: 1; } .meters .fig { order: 2; } }
+
+/* stacked bars on one shared token axis */
+.stack-chart { display: grid; grid-template-columns: auto 1fr; gap: 10px 12px; align-items: center; }
+.stack-chart .rowlabel { font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+.stack { display: flex; gap: 2px; height: 24px; }
+.stack > span { display: block; height: 100%; min-width: 2px; }
+.stack > span:last-child { border-radius: 0 4px 4px 0; }
+.stack > span:focus-visible, .cbar:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.c1 { background: var(--s1); } .c2 { background: var(--s2); } .c3 { background: var(--s3); } .c4 { background: var(--s4); }
+.axis { position: relative; height: 18px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); }
+.axis span { position: absolute; top: 3px; transform: translateX(-50%); }
+.axis span:first-child { transform: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.cbar { display: inline-block; height: 10px; background: var(--s1); border-radius: 0 4px 4px 0; vertical-align: middle; min-width: 0; }
+#tip { position: fixed; z-index: 20; pointer-events: none; background: var(--ink); color: var(--bg); font-size: 12.5px; padding: 5px 9px; border-radius: 6px; max-width: 260px; }
+
+.callout { border-left: 3px solid var(--warn); background: var(--warn-bg); color: var(--ink); padding: 12px 14px; border-radius: 0 8px 8px 0; font-size: 14px; }
+.callout p { max-width: 74ch; }
+ul.plain { margin: 0; padding-left: 1.15em; display: flex; flex-direction: column; gap: 7px; max-width: 74ch; }
+.issue { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.issue:last-child { border-bottom: 0; padding-bottom: 0; } .issue:first-child { padding-top: 0; }
+.issue .n { font-family: var(--font-head); font-weight: 600; font-size: 18px; color: var(--ink-3); }
+.issue .body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.issue .who { font-size: 12.5px; color: var(--ink-3); }
+.issue pre { margin: 0; font-family: var(--font-mono); font-size: 12px; background: var(--accent-soft); padding: 8px 10px; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+dl.obs { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 10px 14px; font-size: 14px; }
+dl.obs dt { font-family: var(--font-head); font-weight: 600; color: var(--ink-3); }
+dl.obs dd { margin: 0; max-width: 72ch; }
+footer { font-size: 12.5px; color: var(--ink-3); border-top: 1px solid var(--line); padding-top: 16px; }
+.stack-chart .rowlabel small { display: block; font-size: 11.5px; color: var(--ink-3); }
+td small { color: var(--ink-3); font-size: 11.5px; }
+th { vertical-align: bottom; line-height: 1.35; }
+.kpi .note { line-height: 1.5; }
+footer a { color: var(--accent); }
+h3 { margin-top: 6px; }
+</style>
+<style>
+:root { --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans SC", monospace; }
+.scroll > table { min-width: 640px; }
+.scroll td:first-child, .scroll td.nw { white-space: nowrap; }
+.scroll a { color: inherit; }
+ul.plain .mono, p .mono { overflow-wrap: anywhere; }
+@media (max-width: 560px) { .meters { grid-template-columns: 1fr auto; grid-auto-flow: row dense; } .meters .name { order: 0; grid-column: 1; } .meters .fig { order: 0; grid-column: 2; } .meters .meter { order: 0; grid-column: 1 / -1; } }
+</style>
+</head>
+<body style="margin:0">
+
+<div class="page">
+
+<header>
+  <div class="eyebrow">nanolize · claude/task-effort-out-of-jobs @ edf7b841（PR #48）· 2026-11-20 · Claude Code 插件 · effort=high</div>
+  <h1>tqdm 压缩运行报告：把任务评估移出作业流程之后的分支</h1>
+  <p class="lede">用 PR #48 的分支（任务 tokens 评估移出作业流程、运行页改为六个阶段）自带的插件对 tqdm 做的一次完整压缩作业，参数是 <span class="mono">unattended=on scope=all pair=on effort=high <span style="white-space:nowrap">--cn</span></span>。运行拆成主作业和草稿作业两个作业，作业里所有角色都是 <span class="mono">claude-fable-5-2</span>、<span class="mono">effort=high</span>，检查在集群的 CPU 计算节点上跑。作业结束状态是 <span class="pill warn"><i>!</i> completed_with_gaps</span>：交付的候选在完整比较里 60 项检查全部通过，全新环境的安装检查 4/4 通过；两个缺口都来自“没能验证”，不是“验证失败”。体积是原版的 55.5%，没到 50% 的参考目标。从阶段 01 到交付，每一步工具调用都一次通过，没有需要绕过的错误；读记录时发现 1 个需要改 nanolize 的问题（main 上就有，不是这个分支带来的）。</p>
+  <div class="meta">
+    <span><b>原版</b> tqdm @ 9cf5a12，加一个只含恢复出的测试文件的提交</span>
+    <span><b>主作业</b> <span class="mono">6f963f0d…4d564915</span></span>
+    <span><b>草稿作业</b> <span class="mono">d6327280…d458d55d50</span></span>
+    <span><b>范围</b> scope=all，25 个叶子功能全选</span>
+    <span><b>交付</b> candidate-3（第 3 个候选）</span>
+    <span><b>运行器</b> nanolize 自带的 Claude Code 适配器，沙箱开启；24 条调用记录全部是 claude-fable-5-2、effort=high</span>
+  </div>
+</header>
+
+<section aria-label="关键数字">
+  <div class="kpis">
+    <div class="kpi"><div class="label">交付的体积（源码 + 配置 token）</div><div class="value">36,852</div><div class="note">源码 32,348 + 配置 4,504<br>是原版 66,390 的 55.5% <span class="pill warn"><i>!</i> 参考目标 50% 没到</span></div></div>
+    <div class="kpi"><div class="label">第一版的作者调用</div><div class="value">48 min 44 s</div><div class="note">2 次调用，$23.76，输出 269,385 token<br>43 min 23 s（$20.86）+ 5 min 21 s（$2.90）</div></div>
+    <div class="kpi"><div class="label">评审对设计结果的否决</div><div class="value">5<small> / 31 个结论</small></div><div class="note">第一次评审否决 4 个文件，重做后第二次评审又否决 1 个<br>场景文件 7 个，没有被否决的</div></div>
+    <div class="kpi"><div class="label">修复轮数</div><div class="value">2<small> 次修复调用</small></div><div class="note">controller 2 轮，共 3 个候选<br>第一版 60 项检查里 2 项失败</div></div>
+    <div class="kpi"><div class="label">测试设计</div><div class="value">5<small> 个叶子补了测试</small></div><div class="note">设计后没有叶子缺有效测试<br>24 个待改写的原始测试：19 个改写成功，5 个没验证</div></div>
+    <div class="kpi"><div class="label">耗时 / 花费</div><div class="value">1 h 14 min</div><div class="note">从提交到交付 1 h 13 min 33 s；模型花费 $66.51（逐次记录）<br>21 次调用，输出 716,008 token</div></div>
+  </div>
+</section>
+
+<section>
+  <h2>结果</h2>
+  <p>交付的是 candidate-3。它和冻结的原版做完整比较时，60 项检查全部通过，共 655 个测试用例和场景用例通过、5 个跳过，另有 14 项输出比较一致。安装检查在全新环境里从候选目录安装，再做导入、<span class="mono">python -m tqdm</span> 和控制台脚本三步检查，4 步全过。32 个功能节点里 29 个完全验证，3 个部分验证，0 个失败。</p>
+  <div class="panel">
+    <h3>最终比较里的 60 项检查</h3>
+    <div class="scroll"><table>
+      <tr><th>来源</th><th class="num">检查</th><th class="num">通过的用例</th><th class="num">跳过</th><th>说明</th></tr>
+      <tr><td>原版测试文件，原样保留</td><td class="num">14</td><td class="num">48</td><td class="num">2</td><td>没有用到契约之外的名字的测试文件</td></tr>
+      <tr><td>从被拆开的原版测试里恢复的</td><td class="num">6</td><td class="num">91</td><td class="num">3</td><td>85 个只用对外契约的测试函数，转换时写成 6 个新文件</td></tr>
+      <tr><td>作业里设计出的测试</td><td class="num">19</td><td class="num">297</td><td class="num">0</td><td>5 个叶子，其中 19 个测试函数是改写的原始测试</td></tr>
+      <tr><td>作业里设计出的场景文件</td><td class="num">7</td><td class="num">219</td><td class="num">0</td><td>只给输入；原版上的输出录下来，候选逐个用例比较</td></tr>
+      <tr><td>放在仓库外的输出比较脚本</td><td class="num">14</td><td class="num">—</td><td class="num">—</td><td>之前每次 tqdm 运行共用的 14 个脚本</td></tr>
+      <tr><td><b>合计</b></td><td class="num"><b>60</b></td><td class="num"><b>655</b></td><td class="num"><b>5</b></td><td></td></tr>
+    </table></div>
+  </div>
+  <div class="panel">
+    <h3>验收缺口</h3>
+    <div class="sub">两个缺口都标着 failed: false；nanolize 没有做“功能完全保留”的声明</div>
+    <div class="scroll"><table>
+      <tr><th>缺口</th><th>含义</th><th>来源</th></tr>
+      <tr><td><span class="mono">behavior_obligations_incomplete</span></td><td>3 个节点只算部分验证，0 个失败</td><td>测试环境没有装 keras，原版的 keras 测试整个跳过，在原版上没有一个执行的用例。受影响的是 keras 回调这个叶子和它的两个上级分组；作业为它设计的 2 个测试文件和 1 个场景文件是通过的</td></tr>
+      <tr><td><span class="mono">original_checks_not_verified</span></td><td>转换拆开的 117 个原始测试里 5 个没有被任何测试替代</td><td>4 个要靠私有钩子注入虚拟时钟，用真实时钟没法稳定检查；1 个随被否决的文件丢弃。5 个都不是只用公开接口的测试</td></tr>
+    </table></div>
+  </div>
+</section>
+
+<section>
+  <h2>时间：按阶段拆开</h2>
+  <p>从提交（22:27:44 UTC）到交付（23:41:17 UTC）共 1 小时 13 分 33 秒。主作业冻结契约用了 45.0 分钟，其中测试设计 34.4 分钟；封存后只等了 6.0 分钟，草稿作业就写完了第一版；之后的比较、修复和交付用了 22.3 分钟。</p>
+  <div class="panel">
+    <h3>两个作业的时间轴</h3>
+    <div class="sub">同一条时间轴，单位分钟；悬停看每一段</div>
+    <div class="stack-chart">
+      <div class="rowlabel">主作业<small>73.6 min</small></div>
+      <div class="stack" style="width:100.0%"><span class="c1" style="width:0.82%" tabindex="0" data-tip="主作业 · 准备、三个运行器各试跑一次、建工作区：0.6 min"></span><span class="c1" style="width:4.96%" tabindex="0" data-tip="主作业 · 冻结：第一次录基线（34 项检查，含重复运行和敲除）：3.7 min"></span><span class="c1" style="width:46.81%" tabindex="0" data-tip="主作业 · 冻结：测试设计（两轮设计、两次评审、在节点上试跑）：34.4 min"></span><span class="c1" style="width:8.52%" tabindex="0" data-tip="主作业 · 冻结：提交 26 个设计文件，第二次录基线（60 项检查）和封存：6.3 min"></span><span class="c2" style="width:8.57%" tabindex="0" data-tip="主作业 · 契约封存后等草稿作业写完第一版并导入：6.3 min"></span><span class="c3" style="width:29.34%" tabindex="0" data-tip="主作业 · 3 次完整比较、2 次定向比较、2 次修复、2 次安装检查、controller 2 轮：21.6 min"></span><span class="c4" style="width:0.98%" tabindex="0" data-tip="主作业 · 重放被拆开的原版测试并交付：0.7 min"></span></div>
+      <div class="rowlabel">草稿作业<small>50.9 min</small></div>
+      <div class="stack" style="width:69.1%"><span class="c1" style="width:2.99%" tabindex="0" data-tip="草稿作业 · 工作区、在本机录一次基线、封存：1.5 min"></span><span class="c2" style="width:85.84%" tabindex="0" data-tip="草稿作业 · 范围 1（23 个功能）：会话 43.4 min，$20.86，输出 239,642 tokens"></span><span class="c2" style="width:11.17%" tabindex="0" data-tip="草稿作业 · 范围 2（维护脚本、性能基准）：会话 5.3 min，$2.90，输出 29,743 tokens"></span></div>
+      <div></div>
+      <div class="axis" aria-hidden="true"><span style="left:0%">0</span><span style="left:20.4%">15</span><span style="left:40.8%">30</span><span style="left:61.2%">45</span><span style="left:81.6%">60 min</span></div>
+    </div>
+    <div class="legend"><span><i class="c1"></i>冻结（基线、测试设计、封存）</span><span><i class="c2"></i>第一版：作者调用；主作业在等</span><span><i class="c3"></i>比较、修复</span><span><i class="c4"></i>交付</span></div>
+  </div>
+  <div class="panel">
+    <h3>各阶段用时</h3>
+    <div class="scroll"><table>
+      <tr><th>阶段</th><th>步骤</th><th class="num">用时</th><th>说明</th></tr>
+      <tr><td>冻结<br><small>45.0 min</small></td><td>准备和运行器试跑</td><td class="num">0.6 min</td><td>作者、controller、测试设计三个运行器各一次真实调用</td></tr>
+      <tr><td></td><td>第一次录基线</td><td class="num">3.7 min</td><td>34 项检查在原版上通过，带重复运行和敲除；1 个选中的叶子没有有效测试</td></tr>
+      <tr><td></td><td>测试设计：第一轮设计者</td><td class="num">8.3 min</td><td>5 个会话并行，最长的一个 8.3 min；交了 24 个文件</td></tr>
+      <tr><td></td><td>测试设计：第一次评审</td><td class="num">6.6 min</td><td>3 个会话并行，各 8 个结论；否决 4 个文件</td></tr>
+      <tr><td></td><td>测试设计：重做一轮</td><td class="num">6.9 min</td><td>3 个会话并行（0.5、0.9、6.9 min）；交了 7 个文件</td></tr>
+      <tr><td></td><td>测试设计：第二次评审</td><td class="num">6.4 min</td><td>1 个会话，7 个结论；否决 1 个文件</td></tr>
+      <tr><td></td><td>测试设计：在节点上试跑设计结果</td><td class="num">6.2 min</td><td>设计步骤 34.4 min 里除去上面四项的部分</td></tr>
+      <tr><td></td><td>第二次录基线和封存</td><td class="num">6.3 min</td><td>60 项检查（原有 34 项 + 设计的 26 个文件）；63 个由验证方持有的文件</td></tr>
+      <tr><td>第一版<br><small>50.9 min</small></td><td>草稿作业的准备</td><td class="num">1.5 min</td><td>工作区、在本机录一次基线、封存</td></tr>
+      <tr><td></td><td>2 次作者调用</td><td class="num">48.7 min</td><td>两个范围先后进行</td></tr>
+      <tr><td></td><td>主作业等待</td><td class="num">6.0 min</td><td>主作业 23:12:41 封存，23:18:39 拿到第一版</td></tr>
+      <tr><td>修复<br><small>21.6 min</small></td><td>3 次完整比较</td><td class="num">4.8 min</td><td>每次 1.5 到 1.6 min</td></tr>
+      <tr><td></td><td>2 次定向比较</td><td class="num">1.3 min</td><td>修复后先比失败的和相邻的检查</td></tr>
+      <tr><td></td><td>2 次修复调用</td><td class="num">12.6 min</td><td>4.1 min 和 8.5 min（含保存）</td></tr>
+      <tr><td></td><td>2 次安装检查</td><td class="num">0.5 min</td><td>每次 16 秒，都通过</td></tr>
+      <tr><td></td><td>controller 2 轮</td><td class="num">2.3 min</td><td>0.8 min 和 1.5 min</td></tr>
+      <tr><td>交付</td><td>重放和交付</td><td class="num">0.7 min</td><td>重放被转换拆开的 5 个原版测试文件，只报告不改变结果</td></tr>
+    </table></div>
+  </div>
+  <div class="callout"><p>拆成两个作业在这次运行里是划算的：冻结（45.0 分钟）和写第一版（50.9 分钟）几乎完全重叠，主作业只空等了 6.0 分钟。整个运行里最长的单个步骤是测试设计（34.4 分钟），其次是第一版的范围 1（43.4 分钟，和冻结并行）。</p></div>
+</section>
+
+<section>
+  <h2>花费和 token：按角色</h2>
+  <p>数字来自适配器给每次调用留下的记录（每个会话自己上报的花费和分模型 token），没有用作业自己的 token 计数。输入分三列：没有命中缓存的输入、写入缓存的输入、从缓存读取的输入。不含主持这次运行的会话本身。</p>
+  <div class="panel">
+    <h3>每个角色的调用</h3>
+    <div class="scroll"><table>
+      <tr><th>角色</th><th class="num">调用</th><th class="num">输入<br>未缓存</th><th class="num">输入<br>写入缓存</th><th class="num">输入<br>读取缓存</th><th class="num">输出</th><th class="num">会话时间</th><th class="num">花费</th></tr>
+      <tr><td>作者：第一版（草稿作业）</td><td class="num">2</td><td class="num">164</td><td class="num">466,584</td><td class="num">16,778,522</td><td class="num">269,385</td><td class="num">48.7 min</td><td class="num">$23.76</td></tr>
+      <tr><td>作者：修复（主作业）</td><td class="num">2</td><td class="num">76</td><td class="num">181,424</td><td class="num">2,322,638</td><td class="num">62,728</td><td class="num">12.0 min</td><td class="num">$6.46</td></tr>
+      <tr><td>controller</td><td class="num">2</td><td class="num">12</td><td class="num">87,689</td><td class="num">185,905</td><td class="num">12,818</td><td class="num">2.2 min</td><td class="num">$2.15</td></tr>
+      <tr><td>测试设计者</td><td class="num">8</td><td class="num">176</td><td class="num">560,958</td><td class="num">4,247,736</td><td class="num">250,958</td><td class="num">43.8 min</td><td class="num">$21.85</td></tr>
+      <tr><td>测试评审者</td><td class="num">4</td><td class="num">100</td><td class="num">364,486</td><td class="num">2,300,346</td><td class="num">119,175</td><td class="num">21.5 min</td><td class="num">$12.17</td></tr>
+      <tr><td>作业开头的运行器试跑</td><td class="num">3</td><td class="num">10</td><td class="num">4,079</td><td class="num">30,875</td><td class="num">944</td><td class="num">0.3 min</td><td class="num">$0.12</td></tr>
+      <tr><td><b>合计</b></td><td class="num"><b>21</b></td><td class="num"><b>538</b></td><td class="num"><b>1,665,220</b></td><td class="num"><b>25,866,022</b></td><td class="num"><b>716,008</b></td><td class="num"></td><td class="num"><b>$66.51</b></td></tr>
+    </table></div>
+    <div class="sub">测试设计（设计者加评审者）12 次调用、$34.02，占 51%；作者 4 次调用、$30.22，占 45%。提交之前另有 3 次运行器试跑，$0.16，不在合计里。</div>
+  </div>
+  <div class="panel">
+    <h3>第一版的 2 次作者调用</h3>
+    <div class="scroll"><table>
+      <tr><th>范围</th><th>功能</th><th class="num">用时</th><th class="num">输出 token</th><th class="num">读取缓存</th><th class="num">花费</th><th class="num">借阅的原版文件</th><th class="num">函数体重复度</th></tr>
+      <tr><td>范围 1</td><td>23 个功能：核心进度条、命令行、各前端、各集成、contrib、示例</td><td class="num">43 min 23 s</td><td class="num">239,642</td><td class="num">15,915,441</td><td class="num">$20.86</td><td class="num">44</td><td class="num">68%</td></tr>
+      <tr><td>范围 2</td><td>2 个功能：维护脚本、性能基准</td><td class="num">5 min 21 s</td><td class="num">29,743</td><td class="num">863,081</td><td class="num">$2.90</td><td class="num">7</td><td class="num">67%</td></tr>
+    </table></div>
+    <div class="sub">用时是每个会话自己的时长。第一版共 47 个文件，由主作业直接导入为 candidate-1，没有再调用作者。</div>
+  </div>
+</section>
+
+<section>
+  <h2>交付的体积</h2>
+  <p>nanolize 报告的口径是源码加配置的 token 数：交付 36,852，是原版 66,390 的 55.5%，参考目标是 50%（33,195），差 3,657 个 token。</p>
+  <div class="panel">
+    <h3>三个口径</h3>
+    <div class="meters">
+      <div class="name">源码加配置<small>36,852 / 66,390 token</small></div>
+      <div class="meter" role="img" aria-label="55.5%，目标线在 50%"><span style="width:55.5%"></span><em style="left:50%"></em></div>
+      <div class="fig">55.5%<small>目标线 50%</small></div>
+      <div class="name">只算源码<small>32,348 / 45,979 token，46 / 48 个文件</small></div>
+      <div class="meter" role="img" aria-label="70.4%"><span style="width:70.4%"></span></div>
+      <div class="fig">70.4%<small>源码减少 29.6%</small></div>
+      <div class="name">只算配置<small>4,504 / 20,411 token，5 / 23 个文件</small></div>
+      <div class="meter" role="img" aria-label="22.1%"><span style="width:22.1%"></span></div>
+      <div class="fig">22.1%<small>18 个文件不在交付里</small></div>
+    </div>
+  </div>
+  <div class="callout"><p><b>读 55.5% 时要注意两点。</b>第一，减少的 29,538 个 token 里，15,907 个（54%）属于交付里根本没有的 18 个配置文件（<span class="mono">DEMO.ipynb</span> 8,881、<span class="mono">examples/paper.bib</span> 2,197、<span class="mono">.github/</span> 下 8 个文件 3,045 等），留下的 5 个配置文件和原版逐行相同；重写源码贡献的是 13,631 个（46%）。第二，源码减少的部分里，docstring 从 9,872 降到 4,250、注释从 3,579 降到 1,007，两项合计 8,194；Python 代码本身从 31,396 降到 26,557，减少 15%。</p></div>
+  <ul class="plain">
+    <li>三个候选的体积：candidate-1 36,315（54.7%），candidate-2 36,815（55.5%），candidate-3 36,852（55.5%）。两次修复各增加了几十到几百个 token。</li>
+    <li>没有做体积优化。这是这个版本的设计：体积目标是参考性的；没有做过性能修复的作业里，只为体积的优化调用会被拒绝，除非所有者指定了一个不同于默认值的优化次数。controller 每轮看到的可用优化次数是 0，两轮都是“行为通过、安装通过就交付”。</li>
+    <li>源码行数 3,750 / 5,608（66.9%）。源码文件少了 <span class="mono">tqdm/_monitor.py</span> 和 <span class="mono">tqdm/_tqdm_pandas.py</span>，没有新增文件；相应的功能检查全部通过。</li>
+    <li>公开定义里带文档的比例从 63.3%（105 / 166）降到 36.1%（53 / 147）。</li>
+    <li>没有文件被原样携带。</li>
+  </ul>
+</section>
+
+<section>
+  <h2>与原版相同的行</h2>
+  <div class="panel">
+    <div class="meters">
+      <div class="name">全部计量文件<small>51 个，按 nanolize 自己的方法：同路径文件里相同的行，按长度加权</small></div>
+      <div class="meter" role="img" aria-label="62.3%"><span style="width:62.3%"></span></div>
+      <div class="fig">62.3%</div>
+      <div class="name">只算 Python 文件<small>45 个</small></div>
+      <div class="meter" role="img" aria-label="57.1%"><span style="width:57.1%"></span></div>
+      <div class="fig">57.1%</div>
+      <div class="name">其余文件<small>6 个：man page、补全脚本和配置，都没有改动</small></div>
+      <div class="meter" role="img" aria-label="100%"><span style="width:100%"></span></div>
+      <div class="fig">100%</div>
+      <div class="name">函数体重复度<small>1,872 行被比较；参考线 40%</small></div>
+      <div class="meter" role="img" aria-label="68%，参考线在 40%"><span style="width:68%"></span><em style="left:40%"></em></div>
+      <div class="fig">68%<small>33 个函数超过单函数参考线</small></div>
+    </div>
+  </div>
+  <p>这个版本默认不因为重复度退回文件（<span class="mono">max_rewrites</span> 为 0）：数字每次都量、告诉作者和 controller、记进交付记录，但不拦保存。同时每次作者调用都会借到它负责的功能的原版源码（只读）。最大的文件 <span class="mono">tqdm/std.py</span> 有 56.9% 的行和原版相同，<span class="mono">tqdm/cli.py</span> 48.8%，<span class="mono">tqdm/utils.py</span> 52.1%。</p>
+</section>
+
+<section>
+  <h2>清单转换</h2>
+  <div class="panel">
+    <div class="scroll"><table>
+      <tr><th>项目</th><th class="num">数字</th><th>说明</th></tr>
+      <tr><td>功能节点 / 叶子</td><td class="num">32 / 25</td><td>沿用之前每次 tqdm 运行共用的那份人工复核过的功能图</td></tr>
+      <tr><td>功能：对外 / 只描述行为</td><td class="num">23 / 9</td><td></td></tr>
+      <tr><td>接口条目</td><td class="num">258</td><td>另手写 33 句：环境变量、默认格式、固定消息、注册名、打包信息</td></tr>
+      <tr><td>检查：转换前 / 转换后</td><td class="num">33 / 34</td><td>5 项原始检查被拆开，换成 6 项恢复出的检查</td></tr>
+      <tr><td>被拆开的原始测试</td><td class="num">117</td><td>其中 85 个只用对外契约</td></tr>
+      <tr><td>恢复出的测试</td><td class="num">85 个，6 个文件</td><td>已提交到克隆的 master 分支，提交人是 nanolize（克隆没有 Git 身份）</td></tr>
+      <tr><td>交给测试设计改写</td><td class="num">24</td><td>用到契约之外名字的测试</td></tr>
+      <tr><td>内部 / 非行为</td><td class="num">7 / 1</td><td>不进入验收，也不算缺口</td></tr>
+      <tr><td>体积基线</td><td class="num">66,390</td><td>源码 45,979 + 配置 20,411；48 个源码文件</td></tr>
+    </table></div>
+  </div>
+  <p>计划选中全部 32 个节点、48 个文件、34 项检查。范围审计 0 个问题；14 项输出比较脚本不解析导入，按设计只标注不算问题。</p>
+</section>
+
+<section>
+  <h2>测试设计</h2>
+  <p>第一次录基线之后，25 个选中的叶子里有 1 个没有有效测试（keras 回调：测试环境没装 keras，原版测试整个跳过）。另外 4 个叶子接手了转换拆出来、不能原样恢复的 24 个原始测试，要改写成只用对外契约的测试。一共 5 个叶子的设计者各开一个会话。设计之后没有选中的叶子缺有效测试。</p>
+  <div class="panel">
+    <h3>每个叶子的设计结果</h3>
+    <div class="scroll"><table>
+      <tr><th>叶子</th><th class="num">交来改写的<br>原始测试</th><th class="num">接受的<br>测试文件</th><th class="num">接受的场景文件<br>（用例）</th><th class="num">改写成功</th><th class="num">没验证</th><th class="num">被否决的<br>文件</th><th>说明</th></tr>
+      <tr><td>核心进度条</td><td class="num">16</td><td class="num">5</td><td class="num">2（58）</td><td class="num">11</td><td class="num">5</td><td class="num">3</td><td>没验证的 5 个里 4 个要注入虚拟时钟，1 个随被否决的文件丢弃</td></tr>
+      <tr><td>命令行</td><td class="num">2</td><td class="num">5</td><td class="num">1（40）</td><td class="num">2</td><td class="num">0</td><td class="num">1</td><td>被否决的文件重做后通过</td></tr>
+      <tr><td>并发 map</td><td class="num">1</td><td class="num">5</td><td class="num">2（77）</td><td class="num">1</td><td class="num">0</td><td class="num">1</td><td>被否决的文件重做后通过</td></tr>
+      <tr><td>日志重定向</td><td class="num">5</td><td class="num">2</td><td class="num">1（19）</td><td class="num">5</td><td class="num">0</td><td class="num">0</td><td></td></tr>
+      <tr><td>Keras 回调</td><td class="num">0</td><td class="num">2</td><td class="num">1（25）</td><td class="num">—</td><td class="num">—</td><td class="num">0</td><td>原来没有有效测试的那个叶子；用假的 keras 包顶替第三方依赖</td></tr>
+      <tr><td><b>合计</b></td><td class="num"><b>24</b></td><td class="num"><b>19</b></td><td class="num"><b>7（219）</b></td><td class="num"><b>19</b></td><td class="num"><b>5</b></td><td class="num"><b>5</b></td><td>19 个测试文件里有 297 个用例</td></tr>
+    </table></div>
+  </div>
+  <div class="panel">
+    <h3>评审的 5 次否决</h3>
+    <div class="scroll"><table>
+      <tr><th>评审</th><th>文件所属叶子</th><th>否决的理由</th><th>之后</th></tr>
+      <tr><td>第一次</td><td>核心进度条</td><td>改写的测试改了原测试的输入（<span class="mono">mininterval</span> 从 1 变成 0.2），结果取决于真实耗时</td><td>重做：拆成 3 个文件，2 个通过，1 个在第二次评审被否决</td></tr>
+      <tr><td>第一次</td><td>核心进度条</td><td>一个新设计的测试最后一段在真实时钟下取决于机器速度</td><td>重做后通过</td></tr>
+      <tr><td>第一次</td><td>命令行</td><td>测试直接打开包目录里的 man page 和补全脚本当期望值，依赖内部文件布局</td><td>重做后通过</td></tr>
+      <tr><td>第一次</td><td>并发 map</td><td>一个断言读了默认写锁类的 <span class="mono">mp_lock</span> 属性，这个类不在对外名字里</td><td>重做后通过</td></tr>
+      <tr><td>第二次</td><td>核心进度条</td><td>改写的测试漏掉了原测试对 <span class="mono">dynamic_miniters</span> 的两处断言；评审认为这是公开类上的属性，设计者当它是契约之外的内部属性</td><td>没有下一轮，整份文件丢弃；它对应的 1 个原始测试没有验证</td></tr>
+    </table></div>
+    <div class="sub">评审共给了 31 个结论（第一次 24 个，第二次 7 个），26 个接受、5 个否决。7 个场景文件都没有被否决。</div>
+  </div>
+  <ul class="plain">
+    <li>共 12 个会话：设计者 8 个（5 + 重做 3），评审者 4 个（3 + 复审 1），花费 $34.02。</li>
+    <li>没验证的 5 个原始测试：<span class="mono">test_max_interval</span>、<span class="mono">test_smoothed_dynamic_min_iters</span>、<span class="mono">test_monitoring_and_cleanup</span>、<span class="mono">test_monitoring_multi</span>（都要通过私有钩子注入虚拟时钟）和 <span class="mono">test_smoothed_dynamic_min_iters_with_min_interval</span>（上表最后一行）。</li>
+    <li>第二次评审否决的文件，评审自己写明“其余部分都忠实于原测试，应当保留”。文档规定第二次评审之后没有下一轮，所以整份文件丢弃，作业事件里写明“它检查的东西现在没有任何测试检查”。</li>
+  </ul>
+</section>
+
+<section>
+  <h2>修复过程</h2>
+  <div class="panel">
+    <div class="scroll"><table>
+      <tr><th>时间（UTC）</th><th>事件</th><th>结果</th></tr>
+      <tr><td>23:18</td><td>主作业导入草稿作业的第一版，作为 candidate-1</td><td>47 个文件，36,315 token</td></tr>
+      <tr><td>23:19 – 23:20</td><td>第一次完整比较</td><td>58 项通过，2 项失败：终端辅助的原版测试和一个设计出的命令行测试，各一个断言</td></tr>
+      <tr><td>23:20 – 23:26</td><td>controller 第 1 轮：安装检查，一次修复调用（3 min 52 s，$2.30）</td><td>安装 4/4；存成 candidate-2</td></tr>
+      <tr><td>23:26 – 23:28</td><td>定向比较和完整比较</td><td>先前的 2 项修好了；原先通过的维护脚本输出比较变成不通过</td></tr>
+      <tr><td>23:28 – 23:38</td><td>controller 第 2 轮：对比两个候选，一次修复调用（8 min 12 s，$4.17）</td><td>存成 candidate-3</td></tr>
+      <tr><td>23:38 – 23:40</td><td>定向比较、完整比较、安装检查</td><td>60 项通过，没有失败；安装 4/4</td></tr>
+      <tr><td>23:40 – 23:41</td><td>重放被拆开的原版测试，交付</td><td>completed_with_gaps</td></tr>
+    </table></div>
+  </div>
+  <p>第二次修复是第一次修复带来的：controller 的判断是第一次修复对 <span class="mono">tqdm/std.py</span> 和 <span class="mono">tqdm/cli.py</span> 的改动让维护脚本生成的内容变了。没有被拒绝的保存，没有体积优化，没有恢复到旧候选。修复时作者同样借到了原版源码：两次分别打开了 7 个和 11 个原版文件。</p>
+</section>
+
+<section>
+  <h2>重放被拆开的原版测试</h2>
+  <p>交付之后，nanolize 把转换时拆出验收的 5 个原版测试文件在原版和交付物上各跑一遍，结果只报告、不改变状态。原版和交付物各 133 个用例，全部通过，没有差异。</p>
+  <div class="panel">
+    <div class="scroll"><table>
+      <tr><th>类别</th><th class="num">测试</th><th class="num">原版通过</th><th class="num">交付物通过</th><th class="num">退化</th></tr>
+      <tr><td>只用对外契约、已恢复进验收的</td><td class="num">85</td><td class="num">84</td><td class="num">84</td><td class="num">0</td></tr>
+      <tr><td>依赖内部结构的</td><td class="num">24</td><td class="num">24</td><td class="num">24</td><td class="num">0</td></tr>
+    </table></div>
+    <div class="sub">85 里没算通过的 1 个在两边都是跳过（<span class="mono">interpreter_map</span> 需要 Python 3.14）。另有 8 个测试被归为内部或非行为，不重放。</div>
+  </div>
+  <p>依赖内部结构的 24 个测试（包括没能在作业里验证的 5 个）在交付物上也全部通过。这是事后的测量，作业里的任何角色都看不到它。</p>
+</section>
+
+<section>
+  <h2>检查在计算节点上跑</h2>
+  <p>集群设置是用只读命令查出来的（<span class="mono">sinfo</span>、<span class="mono">sacctmgr</span> 和不会真正提交的 <span class="mono">sbatch --test-only</span>）。我自己没有往调度器提交、启动或取消任何任务；调度器只由 nanolize 自己的检查执行器使用。</p>
+  <div class="panel">
+    <div class="scroll"><table>
+      <tr><th>设置</th><th>取值</th><th>依据</th></tr>
+      <tr><td>账户</td><td class="nw">默认账户</td><td>用户没有给；调度器记录的默认账户</td></tr>
+      <tr><td>分区</td><td><span class="mono">cpu</span></td><td>用户没有给；按调度器列出的顺序，第一个开着、有节点、不带 GPU、名字不是别的用途的分区；试提交显示可以立即开始</td></tr>
+      <tr><td>QOS</td><td><span class="mono">normal</span></td><td>用户没有给；账户只关联这一个</td></tr>
+      <tr><td><span class="mono">queue_timeout</span></td><td><span class="mono">1800</span></td><td>技能文档规定的值</td></tr>
+    </table></div>
+  </div>
+  <ul class="plain">
+    <li>主作业共用了 2 次分配：1 次探测（2 个 CPU，3 秒）和 1 次检查分配（4 个 CPU、32 GB 内存，持续 1 小时 12 分 50 秒，作业结束时由 nanolize 自己取消）。两次都在提交后 1 到 2 秒内开始。</li>
+    <li>nanolize 的运行环境和测试环境都建在共享存储上，所以不需要另外指定节点上的解释器。</li>
+    <li>草稿作业的那一次基线按设计在登录机上跑。安装检查也在登录机上跑。</li>
+  </ul>
+</section>
+
+<section>
+  <h2>和之前两次同参数运行的对照</h2>
+  <p>这台机器上之前有两次参数相同的 tqdm 运行（全部功能、无人值守、<span class="mono">effort=high</span>、同一个模型、同一份功能图）。下面的体积都按同一个基线（66,390）算。三次运行的 nanolize 版本、作业个数和检查运行的地方都不同，每种只有一个样本，只能当参考。</p>
+  <div class="panel">
+    <div class="scroll"><table>
+      <tr><th></th><th><a href="../tqdm-nanolize-plugin-dc149d2-report/">main @ dc149d2</a><br><small>11-15，一个作业，检查在本机</small></th><th><a href="../tqdm-nanolize-flexible-tools-parallel-report/">flexible-tools-parallel @ 2d4682f</a><br><small>11-17，一个作业，并行模式，检查在本机</small></th><th>本次 @ edf7b841<br><small>11-20，两个作业，检查在计算节点</small></th></tr>
+      <tr><td>结束状态</td><td>succeeded</td><td>completed_with_gaps</td><td>completed_with_gaps</td></tr>
+      <tr><td>交付时通过的检查</td><td class="num">40 / 40</td><td class="num">36 / 36</td><td class="num">60 / 60</td></tr>
+      <tr><td>体积（基线 66,390）</td><td class="num">31,245 · 47.1%</td><td class="num">32,779 · 49.4%</td><td class="num">36,852 · 55.5%</td></tr>
+      <tr><td>总用时</td><td class="num">4 h 27 min</td><td class="num">3 h 44 min</td><td class="num">1 h 14 min</td></tr>
+      <tr><td>模型花费</td><td class="num">$145.68</td><td class="num">$172.08</td><td class="num">$66.51</td></tr>
+    </table></div>
+  </div>
+  <p>本次用时不到之前的三分之一，花费不到一半，交付的体积大 6 到 8 个百分点。体积的差别和这个版本不再为体积单独做优化是对得上的；用时的差别里，两个作业并行、检查在计算节点上跑、作者可以借阅原版源码都有份，这次运行分不出各占多少。</p>
+</section>
+
+<section>
+  <h2>这个分支的改动在这次运行里的表现</h2>
+  <p>PR #48 把任务 tokens 评估移出了作业流程。这次运行里和它直接有关的几点：</p>
+  <ul class="plain">
+    <li>运行页是六个阶段（01 了解、02 选范围、03 冻结、04 作者、05 验证修复、06 交付），三轮候选和交付摘要都正常显示。</li>
+    <li>这次运行产生的评审页、结果页、报告站点、作业配置和事件里都没有任务评估的内容。</li>
+    <li>分支的 MCP 服务列出 47 个工具。阶段 01 到交付用到 16 个工具、25 次调用，全部一次通过。</li>
+    <li>旧选项会被拒绝并说明原因。作业结束后试了一次不会启动任何东西的调用：给启动评审的工具传 <span class="mono">task_effort</span>，答复是“unknown parameter task_effort … If a skill of the nanolize plugin told you to pass it, the plugin's skills are older than this runtime: install the plugin again.”</li>
+    <li>没有用到的：独立的测量工具 <span class="mono">task-effort-measure</span> / <span class="mono">task-effort-report</span>，这次运行不涉及。</li>
+  </ul>
+</section>
+
+<section>
+  <h2>需要对 nanolize 改动的问题</h2>
+  <div class="panel">
+    <div class="issue">
+      <div class="n">B1</div>
+      <div class="body">
+        <h3>检查在计算节点上跑时，基线里“检查在沙箱里跑”这条记录是登录机上的进程写的，不是节点报的</h3>
+        <div class="who">步骤：录基线和每次比较 · 发现方式：读代码 · 本次没有造成错误结果 · main 上就有，不是这个分支带来的</div>
+        <p>原版基线的环境记录里同时写着“检查在沙箱里跑”和“检查在计算节点上跑”，但同一条记录里的内核版本是登录机的：</p>
+        <pre>"check_sandbox": "bwrap"
+"check_executor": {"kind": "slurm", "partition": "cpu", "node": {...}}
+"platform": {"release": "&lt;登录机的内核版本&gt;", ...}</pre>
+        <p>环境记录由登录机上的作业进程生成，其中“能不能建沙箱”问的是这个进程所在的机器。检查本身发到计算节点执行，节点回报的身份只有机器架构、系统、Python 版本、CPU 和 GPU，没有“节点上的检查是否受限”这一项。节点上如果建不了沙箱（计算节点关掉非特权用户命名空间很常见），代码只往批作业日志里写一行提示，之后检查以账号身份、带网络地跑，而基线和每次比较的记录仍然写 <span class="mono">bwrap</span>。</p>
+        <p>沙箱模块的文档说“基线观察到的环境会说明检查是哪一种跑法，一种跑法录的基线不能用于另一种跑法的比较”。对发到节点的检查，这个保证不成立。这次运行的批作业日志里没有那行提示，按代码推断节点上沙箱是建成了的；这是“没看到报错”，不是节点自己报告的结果。建议：让节点在回报的身份里带上它自己的沙箱状态，环境记录取节点的值，并把它算进“是不是同一种节点”的判断。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>遇到的现象（不需要改 nanolize）</h2>
+  <p>下面这些是按设计的行为、环境造成的，或者是操作记录。没有改 nanolize 的代码，没有关掉任何检查，没有放宽任何验收标准。运行中没有出现需要绕过的报错。</p>
+  <div class="panel">
+    <div class="scroll"><table>
+      <tr><th></th><th>现象</th><th>类别</th><th>说明</th></tr>
+      <tr><td>P1</td><td>体积 55.5%，没到 50% 的参考目标，作业没有做精简</td><td>设计内</td><td>这个版本只为体积的优化调用默认被拒绝；想继续压体积，启动评审时要给一个不同于默认值的优化次数，短选项里没有这一项。运行页的“优化”计数显示 0 / 2，分母是配置里的默认上限，实际可用的是 0</td></tr>
+      <tr><td>P2</td><td>第二次评审否决的 1 个测试文件没有再交回设计者，整份丢弃</td><td>设计内</td><td>文档写明第二次评审之后没有下一轮；1 个原始测试因此没有验证</td></tr>
+      <tr><td>P3</td><td>24 个待改写的原始测试里 5 个没有验证</td><td>设计内</td><td>4 个要注入虚拟时钟；见测试设计一节</td></tr>
+      <tr><td>P4</td><td>3 个功能节点只算部分验证</td><td>环境</td><td>测试环境没装 keras；要关掉这个缺口需要装上它</td></tr>
+      <tr><td>P5</td><td>第一次修复引入了一个新的失败，第二次修复才全过</td><td>作者模型的行为</td><td>多一轮修复，约 12 分钟、$5.41（含 controller 一轮）</td></tr>
+      <tr><td>P6</td><td>函数体重复度 68%，高于 40% 的参考线</td><td>设计内</td><td>这个版本只量不退回，作者可以借阅原版源码</td></tr>
+      <tr><td>P7</td><td>交付里少了 18 个配置文件和 2 个源码文件</td><td>现象</td><td>体积下降的 54% 来自没带过来的配置文件；之前每次 tqdm 运行都有同样的现象</td></tr>
+      <tr><td>P8</td><td>作业开头又试跑了一遍三个运行器</td><td>设计内</td><td>提交前按文档试过一次，作业的第一步再试一次；28 秒，$0.12</td></tr>
+      <tr><td>P9</td><td>评审服务在作业结束时自己退出</td><td>设计内</td><td>运行页还开着</td></tr>
+      <tr><td>P10</td><td>节点上的检查是否真的在沙箱里，作业记录里没有来自节点的直接证据</td><td>现象</td><td>只能从批作业日志里没有报错行来推断；原因见 B1</td></tr>
+      <tr><td>P11</td><td>这个分支的插件不是装在机器上的那一份</td><td>操作记录</td><td>机器上装的是旧版插件。我没有动它，而是给这个分支单独建了运行环境，按插件清单的写法起了它自己的 MCP 服务，每一步都是对这个服务的工具调用，没有用命令行顶替</td></tr>
+      <tr><td>P12</td><td>功能图、依赖清单、输出比较脚本、手写的接口句子都沿用之前的</td><td>操作记录</td><td>为了和之前的 tqdm 运行可比</td></tr>
+      <tr><td>P13</td><td>隐藏名单 56 项</td><td>操作记录</td><td>重新扫了一遍机器上的 tqdm 副本；没有隐藏的是其他项目测试环境里代码补全库自带的 tqdm 类型存根（只有签名）</td></tr>
+    </table></div>
+  </div>
+</section>
+
+<section>
+  <h2>启动参数</h2>
+  <ul class="plain">
+    <li>调用：<span class="mono">/nanolize:nanolize tqdm unattended=on scope=all pair=on effort=high --cn</span>。启动评审时传了 <span class="mono">pair="on"</span> 和查出来的 <span class="mono">check_executor</span>；评审的启动和提交都没有被拒绝。</li>
+    <li>其余都是默认值：性能验收关闭，并行模式关闭，超时按原版大小取默认，重复度只量不退回。</li>
+    <li>测试环境：Python 3.11.18，共 60 个包。原版测试 174 个通过、5 个跳过（不含性能测试），性能测试 7 个通过。</li>
+    <li>安装检查 4 步：从候选目录安装，导入并运行基本功能，<span class="mono">python -m tqdm --version</span>，控制台脚本管道测试。</li>
+    <li>对仓库的写入只有一处：按转换给出的命令提交 6 个恢复出的测试文件。没有推送，没有合并。结果在作业自己的分支上（3 个提交），另有一份导出的交付目录。</li>
+    <li>没有往 nanolize 的任何分支推送任何东西。</li>
+  </ul>
+</section>
+
+<footer>通过这些检查不等于功能完全等价：它们只证明实际跑过的那些比较。数字取自两个作业目录里的记录（操作日志、最终验证、代码质量记录、设计记录、重放记录）、适配器给每次模型调用留下的记录，以及调度器的记账记录。</footer>
+
+</div>
+<div id="tip" hidden></div>
+<script>
+(function () {
+  var tip = document.getElementById('tip');
+  function show(el, x, y) {
+    tip.textContent = el.getAttribute('data-tip');
+    tip.hidden = false;
+    var w = tip.offsetWidth, h = tip.offsetHeight;
+    tip.style.left = Math.max(8, Math.min(x - w / 2, window.innerWidth - w - 8)) + 'px';
+    tip.style.top = Math.max(8, y - h - 12) + 'px';
+  }
+  document.querySelectorAll('[data-tip]').forEach(function (el) {
+    el.addEventListener('mousemove', function (e) { show(el, e.clientX, e.clientY); });
+    el.addEventListener('mouseleave', function () { tip.hidden = true; });
+    el.addEventListener('focus', function () { var r = el.getBoundingClientRect(); show(el, r.left + r.width / 2, r.top); });
+    el.addEventListener('blur', function () { tip.hidden = true; });
+  });
+})();
+</script>
+</body>
+</html>
